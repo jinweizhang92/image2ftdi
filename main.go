@@ -26,6 +26,8 @@ import (
 	"github.com/nfnt/resize"
 )
 
+//GetImageFromFile : Will get image from file based on relative path.
+//Retuns an array of bytes
 func GetImageFromFile(filename string) []byte {
 	dat, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -35,6 +37,8 @@ func GetImageFromFile(filename string) []byte {
 	return dat
 }
 
+//GetImageFromURL : Will download an image from the internet and return
+//and array of bytes
 func GetImageFromURL(url string) []byte {
 	res, err := http.Get(url)
 
@@ -47,6 +51,7 @@ func GetImageFromURL(url string) []byte {
 	return dat
 }
 
+// imageToByteBuffer : Takes an image and turns it into an array of RGBA color
 func imageToByteBuffer(img image.Image) []color.Color {
 	buffer := make([]color.Color, 256*256)
 	b := img.Bounds()
@@ -58,11 +63,13 @@ func imageToByteBuffer(img image.Image) []color.Color {
 	return buffer
 }
 
-//Clamps between 0 and 7
+//clamp : Clamps between 0 and 7
 func clamp(value uint32) uint32 {
 	return uint32(value * 7 / 65535)
 }
 
+//colorToShort : Converts a RGBA color to an unsigned short only the lower 9
+//bits have color informstion
 func colorToShort(c color.Color) uint16 {
 	red, green, blue, _ := c.RGBA()
 	r := clamp(red)
@@ -73,6 +80,7 @@ func colorToShort(c color.Color) uint16 {
 	return color
 }
 
+//colorToByteBuffer : converts and array of colors to an array of bytes
 func colorToByteBuffer(colorBuffer []color.Color) []byte {
 	buffer := new(bytes.Buffer)
 	//Twobytes per color
@@ -86,30 +94,36 @@ func colorToByteBuffer(colorBuffer []color.Color) []byte {
 	return buffer.Bytes()
 }
 
+//sendImageToFTDI : sends the array of bytes to the FTDI for writing
 func sendImageToFTDI(byteBuffer []byte) {
 	var img *C.char = C.CString(string(byteBuffer))
 
 	C.sendImage(img)
 }
 
+//SendByte : Sends a single byte to the FTDI
 func SendByte(char byte) {
 	C.sendChar(C.char(char))
 }
 
+//expects -usage -image or no flags. No flags sends one byte at a time to the FTDI
 func main() {
 	urlPtr := flag.String("image", "", "A URL to an image of a image file")
 	usagePtr := flag.Bool("usage", false, "Print Usage Message")
 	flag.Parse()
 
+	//Prints the usage message.
 	if *usagePtr {
 		flag.Usage()
 		return
 	}
 
+	//Prints Device Status
 	if (C.getDevice()) == 0 {
 		fmt.Println("Failed to get device status")
 	}
 
+	//If no command line flags, send 1 byte at a time in loop back
 	if *urlPtr == "" {
 		//Assume loop back
 		scanner := bufio.NewScanner(os.Stdin)

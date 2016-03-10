@@ -9,6 +9,7 @@ FT_DEVICE ftDevice;
 DWORD deviceID;
 char SerialNumber[16];
 char Description[64];
+//Prints Device information and initializes the handle.
 BOOL getDevice(void)
 {
 	FT_STATUS ftStatus; DWORD numDevs = 0;
@@ -71,10 +72,10 @@ else {
 }
 }
 
+//Prints current device info
 void getDeviceInfo(){
 	printf("\n\nftHandle:\t%d\nftDevice:\t%d\nSN:\t%s\nDesc:\t%s\n\n", ftHandle, ftDevice, SerialNumber, Description);
-	printf("Hit 't' key to toggle the lsb.\n");
-	printf("Hit 'x' to exit.\n\n");
+
 }
 
 UCHAR txBuffer[2048]; // transmit buffer
@@ -84,6 +85,8 @@ FT_STATUS ftWriteStatus;
 FT_STATUS ftReadStatus;
 
 int bytesWritten, bytesReceived;
+
+//Sends a single char to the device
 int sendChar(char key){
 	txBuffer[0] = key;
 	sz = sizeof(rxBuffer);
@@ -103,6 +106,7 @@ int sendChar(char key){
 	}
 }
 
+//Sends a full image to the device.
 void sendImage(char* image){
 	memcpy(txBuffer, image, 2048);
 	sz = sizeof(rxBuffer);
