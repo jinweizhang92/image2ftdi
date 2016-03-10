@@ -4,15 +4,12 @@ package main
 #cgo CFLAGS: -m64 -I C:/FTDI
 #cgo LDFLAGS: -L. C:/FTDI/amd64/ftd2xx64.dll
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include "ftd2xx.h"
+#include "ftdiutil.h"
 */
 import "C"
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"flag"
@@ -24,7 +21,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"unsafe"
+	"os"
 
 	"github.com/nfnt/resize"
 )
@@ -90,34 +87,43 @@ func colorToByteBuffer(colorBuffer []color.Color) []byte {
 }
 
 func sendImageToFTDI(byteBuffer []byte) {
-	var ftHandle C.FT_HANDLE
-	var ftStatus C.FT_STATUS
-	var bytesWritten C.DWORD
-	TxBuffer := (*C.char)(unsafe.Pointer(&byteBuffer[0]))
+	var img *C.char = C.CString(string(byteBuffer))
 
-	ftStatus = C.FT_Open(0, unsafe.Pointer(&ftHandle))
-	if ftStatus != C.FT_OK {
-		fmt.Println("Failed to open device")
-		return
-	}
-
-	ftStatus = C.FT_Write(ftHandle, TxBuffer, C.DWORD(unsafe.Sizeof(TxBuffer)), (*C.DWORD)(unsafe.Pointer(&bytesWritten)))
-	if ftStatus != C.FT_OK {
-		fmt.Println("Write Okay")
-	} else {
-		fmt.Println("Write Failed")
-	}
-	C.FT_Close(ftHandle)
+	C.sendImage(img)
 }
+
+func SendByte(char byte) {
+	C.sendChar(C.char(char))
+}
+
 func main() {
-	fmt.Println("Step 0")
 	urlPtr := flag.String("image", "", "A URL to an image of a image file")
+	usagePtr := flag.Bool("usage", false, "Print Usage Message")
 	flag.Parse()
 
-	if *urlPtr == "" {
+	if *usagePtr {
 		flag.Usage()
 		return
 	}
+
+	if (C.getDevice()) == 0 {
+		fmt.Println("Failed to get device status")
+	}
+
+	if *urlPtr == "" {
+		//Assume loop back
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if string(line) == "quit" {
+				return
+			}
+			SendByte(line[0])
+			fmt.Print(">>")
+
+		}
+	}
+
 	var data []byte
 	_, err := url.Parse(*urlPtr)
 	if err != nil {
@@ -140,12 +146,12 @@ func main() {
 	}
 
 	m := resize.Resize(256, 256, img, resize.Lanczos3)
-	fmt.Println("Step 1")
+	fmt.Println("Step 1: Resized Image")
 	colorBuffer := imageToByteBuffer(m)
-	fmt.Println("Step 2")
+	fmt.Println("Step 2: Get Color Data from Image")
 	byteBuffer := colorToByteBuffer(colorBuffer)
-	fmt.Println("Step 3", len(byteBuffer))
+	fmt.Println("Step 3: Format Color Data for FTDI BIGENDIAN", len(byteBuffer))
 	sendImageToFTDI(byteBuffer)
-	fmt.Println("Step 4")
+	fmt.Println("Step 4 SEND IMAGE TO FTDI")
 
 }
