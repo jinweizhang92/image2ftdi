@@ -7,4 +7,5 @@
   void getDeviceInfo();
   int sendChar(char key);
   void sendImage(char* image);
+  void closeDevice();
 #endif

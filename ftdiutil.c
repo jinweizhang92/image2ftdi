@@ -78,7 +78,7 @@ void getDeviceInfo(){
 
 }
 
-UCHAR txBuffer[2048]; // transmit buffer
+UCHAR txBuffer[256*256]; // transmit buffer
 UCHAR rxBuffer[1024*64]; // received buffer
 int sz;
 FT_STATUS ftWriteStatus;
@@ -108,19 +108,18 @@ int sendChar(char key){
 
 //Sends a full image to the device.
 void sendImage(char* image){
-	memcpy(txBuffer, image, 2048);
+	int i = 0;
+	memcpy(txBuffer, image, 256*256);
 	sz = sizeof(rxBuffer);
-	ftWriteStatus = FT_Write(ftHandle, txBuffer, 1, &bytesWritten);
+	ftWriteStatus = FT_Write(ftHandle, txBuffer, 256*256, &bytesWritten);
 	if (ftWriteStatus != FT_OK){
-		printf("Error: could not write byte.\n");
+		printf("Error: Managed to write %d bytes, FTDI STatus: %d\n",bytesWritten, ftWriteStatus);
 		return ;
 	}
 	printf("Wrote %d bytes. \n", bytesWritten);
-	txBuffer[0] = !txBuffer[0];
-	ftReadStatus = FT_Read(ftHandle, rxBuffer, 1, &bytesReceived);
-	if ((ftReadStatus != FT_OK) ){
-		printf("Error: could not read byte. \n");
-	} else{
-		printf("Byte returned: 0x%02x\n", rxBuffer[0]);
-	}
+
+}
+
+void closeDevice(){
+	FT_Close(ftHandle);
 }

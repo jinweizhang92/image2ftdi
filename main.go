@@ -10,45 +10,38 @@ import "C"
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/nfnt/resize"
 )
 
 //GetImageFromFile : Will get image from file based on relative path.
 //Retuns an array of bytes
-func GetImageFromFile(filename string) []byte {
-	dat, err := ioutil.ReadFile(filename)
-	if err != nil {
-		fmt.Println(err.Error())
-		panic(err)
-	}
-	return dat
+func GetImageFromFile(filename string) (io.Reader, error, func() error) {
+	r, err := os.Open(filename)
+	return r, err, r.Close
 }
 
 //GetImageFromURL : Will download an image from the internet and return
 //and array of bytes
-func GetImageFromURL(url string) []byte {
+func GetImageFromURL(url string) (io.Reader, error, func() error) {
 	res, err := http.Get(url)
-
-	defer res.Body.Close()
-	dat, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		fmt.Println(err.Error())
-		panic(err)
+		return nil, err, nil
 	}
-	return dat
+	return res.Body, nil, res.Body.Close
 }
 
 // imageToByteBuffer : Takes an image and turns it into an array of RGBA color
@@ -60,6 +53,7 @@ func imageToByteBuffer(img image.Image) []color.Color {
 			buffer[x+y*256] = img.At(x, y)
 		}
 	}
+	//fmt.Println(buffer)
 	return buffer
 }
 
@@ -70,34 +64,32 @@ func clamp(value uint32) uint32 {
 
 //colorToShort : Converts a RGBA color to an unsigned short only the lower 9
 //bits have color informstion
-func colorToShort(c color.Color) uint16 {
+func colorToShort(c color.Color) uint32 {
 	red, green, blue, _ := c.RGBA()
 	r := clamp(red)
 	g := clamp(green)
 	b := clamp(blue)
 
-	var color uint16 = uint16(r << 6 & g << 3 & b)
-	return color
+	return ((r << 6) | (g << 3) | b)
+
 }
 
 //colorToByteBuffer : converts and array of colors to an array of bytes
 func colorToByteBuffer(colorBuffer []color.Color) []byte {
-	buffer := new(bytes.Buffer)
+	buffer := make([]byte, len(colorBuffer))
 	//Twobytes per color
-	for _, c := range colorBuffer {
-		err := binary.Write(buffer, binary.BigEndian, colorToShort(c))
-		if err != nil {
-			fmt.Println(err.Error())
-			panic(err)
-		}
+	for i := 0; i < len(colorBuffer)-2; i = i + 2 {
+		s := colorToShort(colorBuffer[i])
+		buffer[i] = byte((s >> 8) & 0xff)
+		buffer[i+1] = byte(s & 0xff)
 	}
-	return buffer.Bytes()
+	//fmt.Println(buffer)
+	return buffer
 }
 
 //sendImageToFTDI : sends the array of bytes to the FTDI for writing
 func sendImageToFTDI(byteBuffer []byte) {
 	var img *C.char = C.CString(string(byteBuffer))
-
 	C.sendImage(img)
 }
 
@@ -106,9 +98,57 @@ func SendByte(char byte) {
 	C.sendChar(C.char(char))
 }
 
+// decodeImage : Takes an io Reader and tries to decode it given the fileType
+func decodeImage(r io.Reader, fileType string) (image.Image, error) {
+	fileType = strings.ToLower(fileType)
+	switch fileType {
+
+	default:
+		img, codec, err := image.Decode(r)
+		if err == nil {
+			fmt.Printf("Decoded %s Image\n", codec)
+			return img, err
+		}
+		fallthrough
+	case "png":
+		img, err := png.Decode(r)
+		if err != nil {
+			fmt.Println("Image is not a PNG")
+		} else {
+			fmt.Println("Decoded PNG Image")
+			return img, err
+		}
+		fallthrough
+
+	case "jpg":
+		fallthrough
+	case "jpeg":
+		img, err := jpeg.Decode(r)
+		if err != nil {
+			fmt.Println("Image is not a JPEG")
+		} else {
+			fmt.Println("Decoded JPEG Image")
+			return img, err
+		}
+	}
+	return nil, errors.New("Could not Decode Image")
+}
+
+type randomDataMaker struct {
+}
+
+func (r *randomDataMaker) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = byte(255 & 0xff)
+	}
+	return len(p), nil
+}
+
 //expects -usage -image or no flags. No flags sends one byte at a time to the FTDI
 func main() {
-	urlPtr := flag.String("image", "", "A URL to an image of a image file")
+	urlPtr := flag.String("image", "", `A URL to an image of a image file.
+		Don't pass to enter single byte passing mode`)
+	fileTypePtr := flag.String("type", "", "Type of image. Supports png and jpeg")
 	usagePtr := flag.Bool("usage", false, "Print Usage Message")
 	flag.Parse()
 
@@ -121,11 +161,14 @@ func main() {
 	//Prints Device Status
 	if (C.getDevice()) == 0 {
 		fmt.Println("Failed to get device status")
+	} else {
+		defer C.closeDevice()
 	}
 
 	//If no command line flags, send 1 byte at a time in loop back
 	if *urlPtr == "" {
 		//Assume loop back
+		fmt.Print(">>")
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			line := scanner.Bytes()
@@ -138,33 +181,36 @@ func main() {
 		}
 	}
 
-	var data []byte
-	_, err := url.Parse(*urlPtr)
+	reader, err, cleanup := GetImageFromFile(*urlPtr)
 	if err != nil {
-		data = GetImageFromFile(*urlPtr)
-	} else {
-		data = GetImageFromURL(*urlPtr)
-	}
-	// don't worry about errors
-	reader := bytes.NewReader(data)
-	img, imgErr := jpeg.Decode(reader)
-	if imgErr != nil {
-		img, imgErr = png.Decode(reader)
-		if imgErr != nil {
-			img, _, imgErr = image.Decode(reader)
-			if imgErr != nil {
-				fmt.Println(imgErr.Error())
-				panic(err)
+		fmt.Println("Could not find a file with this name, attempting to find url")
+		_, urlErr := url.Parse(html.EscapeString(strings.TrimSpace(*urlPtr)))
+		if urlErr == nil {
+			reader, err, cleanup = GetImageFromURL(*urlPtr)
+			if err != nil {
+				fmt.Printf("Could not get image. %s", err.Error())
+				return
 			}
+		} else {
+			fmt.Printf("Could not interpret image as a url: %s. Reformat and try again.\n", urlErr.Error())
+			return
 		}
 	}
 
-	m := resize.Resize(256, 256, img, resize.Lanczos3)
+	defer cleanup()
+
+	image, imgErr := decodeImage(reader, *fileTypePtr)
+	if imgErr != nil {
+		fmt.Println(imgErr.Error())
+		return
+	}
+	//fmt.Println(img)
+	resized := resize.Resize(256, 256, image, resize.NearestNeighbor)
 	fmt.Println("Step 1: Resized Image")
-	colorBuffer := imageToByteBuffer(m)
+	colorBuffer := imageToByteBuffer(resized)
 	fmt.Println("Step 2: Get Color Data from Image")
 	byteBuffer := colorToByteBuffer(colorBuffer)
-	fmt.Println("Step 3: Format Color Data for FTDI BIGENDIAN", len(byteBuffer))
+	fmt.Println("Step 3: Format Color Data for FTDI len", len(byteBuffer))
 	sendImageToFTDI(byteBuffer)
 	fmt.Println("Step 4 SEND IMAGE TO FTDI")
 
