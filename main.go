@@ -76,12 +76,15 @@ func colorToShort(c color.Color) uint32 {
 
 //colorToByteBuffer : converts and array of colors to an array of bytes
 func colorToByteBuffer(colorBuffer []color.Color) []byte {
-	buffer := make([]byte, len(colorBuffer))
+	buffer := make([]byte, len(colorBuffer)*2)
+	for j := 0; j < len(buffer); j++ {
+		buffer[j] = byte(0)
+	}
 	//Twobytes per color
-	for i := 0; i < len(colorBuffer)-2; i = i + 2 {
+	for i := 0; i < len(colorBuffer)-1; i++ {
 		s := colorToShort(colorBuffer[i])
-		buffer[i] = byte((s >> 8) & 0xff)
-		buffer[i+1] = byte(s & 0xff)
+		buffer[2*i+1] = byte((s >> 8) & 0xff)
+		buffer[2*i] = byte(s & 0xff)
 	}
 	//fmt.Println(buffer)
 	return buffer
@@ -90,7 +93,7 @@ func colorToByteBuffer(colorBuffer []color.Color) []byte {
 //sendImageToFTDI : sends the array of bytes to the FTDI for writing
 func sendImageToFTDI(byteBuffer []byte) {
 	var img *C.char = C.CString(string(byteBuffer))
-	C.sendImage(img)
+	C.sendImage(img, C.int(len(byteBuffer)))
 }
 
 //SendByte : Sends a single byte to the FTDI
@@ -168,6 +171,7 @@ func main() {
 	//If no command line flags, send 1 byte at a time in loop back
 	if *urlPtr == "" {
 		//Assume loop back
+		fmt.Println("Sending bytes 1 at a time. Type 'quit' to exit")
 		fmt.Print(">>")
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
@@ -206,6 +210,7 @@ func main() {
 	}
 	//fmt.Println(img)
 	resized := resize.Resize(256, 256, image, resize.NearestNeighbor)
+	fmt.Println(resized.Bounds())
 	fmt.Println("Step 1: Resized Image")
 	colorBuffer := imageToByteBuffer(resized)
 	fmt.Println("Step 2: Get Color Data from Image")
